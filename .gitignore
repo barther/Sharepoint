@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.coverage
+.tox/
+htmlcov/
+.venv/
+venv/
+env/
+.python-version
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project outputs
+archive.sqlite
+archive.sqlite-journal
+archive.sqlite-wal
+archive.sqlite-shm
+pre-launch-backup.zip
+_Archive Notes.txt
+
+# Local configuration that shouldn't be committed
+.env
+.env.local
+config.local.*
