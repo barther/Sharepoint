@@ -4,6 +4,29 @@
 
 ---
 
+## Current Implementation Status
+
+This document is the **specification**. The code currently in this repository implements **slice 1 of N — the local pre-flight pipeline only**. None of the model passes, the Tkinter GUI, the SharePoint Graph integration, the launch artefacts, or the review surface described below are implemented yet.
+
+What slice 1 actually does:
+
+- Walks a local corpus directory, hashes every file (SHA-256), and writes a SQLite database
+- Extracts text from PDF / DOCX / TXT; flags scans and image files as `needs_ocr=True`
+- Local legibility pre-check on images and image-only PDFs (Michelson contrast + estimated DPI)
+- Detects exact hash duplicates (`dup_of_file_id` FK to the retained original)
+- Quarantines empty / corrupt / password-protected files (technical reasons)
+- Applies a JSON-configured **exclusion sweep** for governance categories (pastoral care, giving, personnel, etc.) per §3 / §16; writes `exclusion_log` rows and marks `files.excluded = 1`
+- Persists per-run history in `file_observations` so modified files preserve their prior state
+- Idempotent re-runs (skip files whose `(path, sha256)` already exists)
+
+The schema is designed at v2 to cover the §10 acceptance-criteria queries (`document_references`, `decisions`, `obligations`, `policy_statements`, `sensitive_flags`, `evidence_quotes`, `entities`, `participants`). Those tables exist but are populated only by later slices.
+
+Slice 1 is **CLI-only** (`church-archivist preflight <corpus> --db archive.sqlite [--exclusions config.json]`). The "no command-line interaction" requirement in §6 is a final-product goal; the GUI replaces this surface in a later slice.
+
+Open work tracked against this spec: Haiku pre-classification (slice 2), model routing (slice 3), deep read pass (slice 4), taxonomy proposal + destination assignment (slice 5), Tkinter review UI (slice 6), SharePoint Graph moves + launch artefacts (slice 7).
+
+---
+
 ## 0. Revision Notes (v2 → v3)
 
 This revision reflects a fundamental reframing: **the archive has no existing users.** The corpus was pulled from a single OneDrive previously accessible only to the operator's spouse. No other staff, clergy, board members, or congregants have ever accessed it. This project is therefore a **launch**, not a migration.
