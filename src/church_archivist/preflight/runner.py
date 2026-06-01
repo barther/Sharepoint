@@ -44,6 +44,7 @@ class PreflightResult:
     duplicates: int = 0
     needs_ocr: int = 0
     excluded: int = 0
+    unsupported: int = 0
     events: list[tuple[str, dict]] = field(default_factory=list)
 
 
@@ -100,7 +101,8 @@ def run_preflight(
             result.files_new += 1
             row = conn.execute(
                 "SELECT quarantine_reason, dup_of_file_id, needs_ocr, "
-                "legibility_flag, extractable_text, excluded, exclusion_reason "
+                "legibility_flag, extractable_text, excluded, exclusion_reason, "
+                "unsupported_format "
                 "FROM files WHERE path = ?",
                 (str(sf.path),),
             ).fetchone()
@@ -131,6 +133,16 @@ def run_preflight(
                     {
                         "path": sf.relative_path,
                         "matches_file_id": row["dup_of_file_id"],
+                    },
+                )
+                continue
+            if row["unsupported_format"]:
+                result.unsupported += 1
+                emit(
+                    "unsupported",
+                    {
+                        "path": sf.relative_path,
+                        "format": row["unsupported_format"],
                     },
                 )
                 continue
@@ -290,9 +302,10 @@ def _upsert_file(
                 sha256, mime_type, is_readable, is_empty, is_encrypted,
                 extractable_text, extracted_char_count, needs_ocr,
                 legibility_score, estimated_dpi, legibility_flag,
-                quarantine_reason, dup_of_file_id, excluded, exclusion_reason,
+                quarantine_reason, unsupported_format,
+                dup_of_file_id, excluded, exclusion_reason,
                 first_seen_run_id, last_seen_run_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 str(sf.path), sf.relative_path, sf.filename, sf.extension,
@@ -301,7 +314,8 @@ def _upsert_file(
                 int(ext_result.is_encrypted), int(ext_result.extractable_text),
                 ext_result.char_count, int(ext_result.needs_ocr),
                 leg_result.contrast, leg_result.estimated_dpi, leg_flag,
-                quarantine, dup_of_file_id, excluded, exclusion_reason,
+                quarantine, ext_result.unsupported_format,
+                dup_of_file_id, excluded, exclusion_reason,
                 run_id, run_id,
             ),
         )
@@ -317,8 +331,8 @@ def _upsert_file(
             is_empty = ?, is_encrypted = ?, extractable_text = ?,
             extracted_char_count = ?, needs_ocr = ?, legibility_score = ?,
             estimated_dpi = ?, legibility_flag = ?, quarantine_reason = ?,
-            dup_of_file_id = ?, excluded = ?, exclusion_reason = ?,
-            last_seen_run_id = ?
+            unsupported_format = ?, dup_of_file_id = ?, excluded = ?,
+            exclusion_reason = ?, last_seen_run_id = ?
         WHERE id = ?
         """,
         (
@@ -328,8 +342,8 @@ def _upsert_file(
             int(ext_result.is_encrypted), int(ext_result.extractable_text),
             ext_result.char_count, int(ext_result.needs_ocr),
             leg_result.contrast, leg_result.estimated_dpi, leg_flag,
-            quarantine, dup_of_file_id, excluded, exclusion_reason,
-            run_id, existing["id"],
+            quarantine, ext_result.unsupported_format, dup_of_file_id,
+            excluded, exclusion_reason, run_id, existing["id"],
         ),
     )
     return int(existing["id"])

@@ -2,6 +2,12 @@
 
 Tesseract is treated as optional per the spec: scans that have no extractable
 text layer are flagged with `needs_ocr=True`; they do not fail the pipeline.
+
+Files in formats we recognise but can't extract text from (Publisher,
+Excel, PowerPoint, WordPerfect, etc.) are flagged with `unsupported_format`
+so they don't silently masquerade as "processed" downstream. The category
+label lets a later slice route them — convert via LibreOffice, send to
+manual operator review, or quarantine.
 """
 
 from __future__ import annotations
@@ -16,6 +22,53 @@ from pathlib import Path
 _MIN_TEXT_CHARS = 40
 
 
+# Known-but-unhandled formats, grouped by category so downstream routing
+# can act on the category rather than the raw extension. "publisher" is
+# called out explicitly because Microsoft Publisher is EOL October 2026
+# and these files will be converted to PDF separately; pre-flight just
+# needs to surface their count so the conversion punch-list is visible.
+_UNSUPPORTED_FORMATS: dict[str, str] = {
+    "pub":   "publisher",
+    "xls":   "spreadsheet",
+    "xlsx":  "spreadsheet",
+    "xlsm":  "spreadsheet",
+    "ods":   "spreadsheet",
+    "ppt":   "presentation",
+    "pptx":  "presentation",
+    "odp":   "presentation",
+    "odt":   "wordprocessor",
+    "wpd":   "wordperfect",
+    "rtf":   "wordprocessor",
+    "vsd":   "visio",
+    "vsdx":  "visio",
+    "pages": "iwork",
+    "numbers": "iwork",
+    "key":   "iwork",
+    "msg":   "email",
+    "pst":   "email",
+    "ost":   "email",
+    "eml":   "email",
+    "mbox":  "email",
+    "zip":   "archive",
+    "7z":    "archive",
+    "rar":   "archive",
+    "tar":   "archive",
+    "gz":    "archive",
+    "mp3":   "audio",
+    "wav":   "audio",
+    "m4a":   "audio",
+    "mp4":   "video",
+    "mov":   "video",
+    "avi":   "video",
+    "accdb": "database",
+    "mdb":   "database",
+}
+
+
+def _categorize_unsupported(ext: str) -> str:
+    return _UNSUPPORTED_FORMATS.get(ext, "unrecognized")
+
+
 @dataclass
 class ExtractResult:
     extractable_text: bool
@@ -24,6 +77,7 @@ class ExtractResult:
     is_encrypted: bool
     is_readable: bool
     failure_reason: str | None = None
+    unsupported_format: str | None = None
 
 
 def extract(path: Path) -> ExtractResult:
@@ -55,13 +109,15 @@ def extract(path: Path) -> ExtractResult:
             failure_reason=f"{type(exc).__name__}: {exc}",
         )
 
-    # Unknown extension: don't try to extract, but don't fail either.
+    # Unknown / known-but-unhandled extension: don't try to extract, but
+    # don't fail either. Flag the category so downstream code can act.
     return ExtractResult(
         extractable_text=False,
         char_count=0,
         needs_ocr=False,
         is_encrypted=False,
         is_readable=True,
+        unsupported_format=_categorize_unsupported(ext),
     )
 
 
