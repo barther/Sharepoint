@@ -5,6 +5,11 @@ keeps the repo small and makes the ugly cases visible in code. The intent is
 to exercise: zero-byte, corrupt PDF, password-protected PDF, scan-like PDF
 with low contrast, unicode filenames, exact hash duplicates, and a JPEG
 "photo of a document."
+
+Dependencies (reportlab, python-docx, Pillow, numpy, pypdf, opencv) are
+imported at module level. If any are missing, pytest reports a collection
+error rather than silently skipping every test — this prevents a fresh
+clone from reporting a green test suite while exercising nothing.
 """
 
 from __future__ import annotations
@@ -15,6 +20,13 @@ import shutil
 from pathlib import Path
 
 import pytest
+
+# Hard imports: missing dev deps must fail collection, not silently skip.
+import numpy as np
+from PIL import Image
+from docx import Document
+from pypdf import PdfWriter
+from reportlab.pdfgen import canvas
 
 
 # ---------------------------------------------------------------------------
@@ -36,11 +48,6 @@ def _write_corrupt_pdf(root: Path) -> str:
 
 
 def _write_password_protected_pdf(root: Path) -> str:
-    try:
-        from pypdf import PdfWriter
-    except ImportError:
-        pytest.skip("pypdf not available")
-
     name = "password_protected.pdf"
     writer = PdfWriter()
     writer.add_blank_page(width=612, height=792)
@@ -51,11 +58,6 @@ def _write_password_protected_pdf(root: Path) -> str:
 
 
 def _write_text_pdf(root: Path, filename: str, body: str) -> str:
-    try:
-        from reportlab.pdfgen import canvas
-    except ImportError:
-        pytest.skip("reportlab not available")
-
     path = root / filename
     c = canvas.Canvas(str(path))
     text = c.beginText(72, 720)
@@ -68,12 +70,6 @@ def _write_text_pdf(root: Path, filename: str, body: str) -> str:
 
 
 def _write_low_contrast_jpeg(root: Path) -> str:
-    try:
-        import numpy as np
-        from PIL import Image
-    except ImportError:
-        pytest.skip("Pillow/numpy not available")
-
     name = "low_contrast_scan.jpg"
     # Almost uniform gray: michelson contrast will be near-zero.
     arr = np.full((400, 300), 128, dtype=np.uint8)
@@ -83,12 +79,6 @@ def _write_low_contrast_jpeg(root: Path) -> str:
 
 
 def _write_high_contrast_jpeg(root: Path) -> str:
-    try:
-        import numpy as np
-        from PIL import Image
-    except ImportError:
-        pytest.skip("Pillow/numpy not available")
-
     name = "high_contrast_page.jpg"
     # Black text on white: high michelson contrast.
     arr = np.full((3300, 2550), 255, dtype=np.uint8)  # roughly 300 dpi @ letter
@@ -99,11 +89,6 @@ def _write_high_contrast_jpeg(root: Path) -> str:
 
 
 def _write_docx(root: Path, filename: str, body: str) -> str:
-    try:
-        from docx import Document
-    except ImportError:
-        pytest.skip("python-docx not available")
-
     doc = Document()
     for line in body.splitlines() or [body]:
         doc.add_paragraph(line)
@@ -136,6 +121,7 @@ def corpus_root(tmp_path: Path) -> Path:
     (root / "Bulletins").mkdir()
     (root / "Minutes").mkdir()
     (root / "Scans").mkdir()
+    (root / "Pastoral Care").mkdir()
 
     _write_text_pdf(
         root / "Bulletins",
@@ -165,6 +151,13 @@ def corpus_root(tmp_path: Path) -> Path:
     _write_low_contrast_jpeg(root / "Scans")
     _write_high_contrast_jpeg(root / "Scans")
     _write_unicode_named_text(root)
+
+    # A file that exclusion tests will mark as pastoral care.
+    _write_text_pdf(
+        root / "Pastoral Care",
+        "counseling_notes_2019.pdf",
+        "Counseling notes — confidential pastoral conversation.",
+    )
 
     return root
 

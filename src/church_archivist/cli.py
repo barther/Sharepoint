@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from .preflight import run_preflight
+from .preflight.exclusions import ExclusionConfigError, load as load_exclusions
 
 
 def _print_event(kind: str, payload: dict) -> None:
@@ -33,9 +34,28 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
     db_path = Path(args.db).expanduser().resolve()
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
+    exclusion_path = (
+        Path(args.exclusions).expanduser().resolve() if args.exclusions else None
+    )
+    rules = []
+    if exclusion_path is not None:
+        if not exclusion_path.is_file():
+            print(
+                f"error: exclusion config not found: {exclusion_path}",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            rules = load_exclusions(exclusion_path)
+        except ExclusionConfigError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
     result = run_preflight(
         root=root,
         db_path=db_path,
+        exclusion_rules=rules,
+        exclusion_config_path=exclusion_path,
         on_event=None if args.quiet else _print_event,
     )
 
@@ -47,6 +67,7 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
         f"quarantined={result.quarantined} "
         f"duplicates={result.duplicates} "
         f"needs_ocr={result.needs_ocr} "
+        f"excluded={result.excluded} "
         f"run_id={result.run_id}"
     )
     return 0
@@ -65,6 +86,11 @@ def main(argv: list[str] | None = None) -> int:
         "--db",
         default="archive.sqlite",
         help="Path to the SQLite database (default: ./archive.sqlite).",
+    )
+    p.add_argument(
+        "--exclusions",
+        default=None,
+        help="Path to a JSON exclusion config (see README §3 / §16).",
     )
     p.add_argument(
         "--quiet",

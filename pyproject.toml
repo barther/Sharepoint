@@ -18,7 +18,15 @@ dependencies = [
 
 [project.optional-dependencies]
 ocr = ["pytesseract>=0.3.10"]
-dev = ["pytest>=8.0", "reportlab>=4.0"]
+# Test suite requires these. They are not "optional" in the sense that the
+# suite cannot be skipped around them — conftest.py imports them at module
+# level so a missing dep fails collection rather than silently skipping.
+test = [
+    "pytest>=8.0",
+    "reportlab>=4.0",
+    "numpy>=1.26",
+]
+dev = ["church-archivist[test]"]
 
 [project.scripts]
 church-archivist = "church_archivist.cli:main"
