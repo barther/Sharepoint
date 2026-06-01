@@ -12,6 +12,7 @@ What slice 1 actually does:
 
 - Walks a local corpus directory, hashes every file (SHA-256), and writes a SQLite database
 - Extracts text from PDF / DOCX / TXT; flags scans and image files as `needs_ocr=True`
+- Flags recognised-but-unhandled formats (`.pub`, `.xls(x)`, `.ppt(x)`, `.wpd`, `.msg`, etc.) with an `unsupported_format` category so they're visible for follow-up conversion rather than silently passing through
 - Local legibility pre-check on images and image-only PDFs (Michelson contrast + estimated DPI)
 - Detects exact hash duplicates (`dup_of_file_id` FK to the retained original)
 - Quarantines empty / corrupt / password-protected files (technical reasons)

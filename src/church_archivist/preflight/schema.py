@@ -20,7 +20,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS files (
     estimated_dpi          INTEGER,
     legibility_flag        TEXT,
     quarantine_reason      TEXT,                    -- technical: empty/corrupt/encrypted
+    unsupported_format     TEXT,                    -- category when extension is recognised but not extractable (publisher / spreadsheet / etc.)
     dup_of_file_id         INTEGER,                 -- FK to the retained original
 
     -- Governance: see §3 exclusion policy and §16 exclusion log.
@@ -88,6 +89,7 @@ CREATE INDEX IF NOT EXISTS idx_files_sha256       ON files (sha256);
 CREATE INDEX IF NOT EXISTS idx_files_quarantine   ON files (quarantine_reason);
 CREATE INDEX IF NOT EXISTS idx_files_dup          ON files (dup_of_file_id);
 CREATE INDEX IF NOT EXISTS idx_files_excluded     ON files (excluded);
+CREATE INDEX IF NOT EXISTS idx_files_unsupported  ON files (unsupported_format);
 
 -- Per-run history of every file observation. Lets the runner update files in
 -- place while preserving the audit trail required by §5 / §10.

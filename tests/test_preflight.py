@@ -355,6 +355,48 @@ def test_match_first_returns_none_when_no_match() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Unsupported / unrecognised format handling
+# ---------------------------------------------------------------------------
+
+
+def test_unsupported_formats_are_flagged(corpus_root: Path, db_path: Path) -> None:
+    result = run_preflight(root=corpus_root, db_path=db_path)
+    assert result.unsupported >= 5  # pub, xlsx, pptx, wpd, xyz
+
+    conn = connect(db_path)
+    by_ext = dict(
+        (r["filename"], r["unsupported_format"])
+        for r in _rows(
+            conn,
+            "SELECT filename, unsupported_format FROM files "
+            "WHERE unsupported_format IS NOT NULL",
+        )
+    )
+    assert by_ext["newsletter_spring_2018.pub"] == "publisher"
+    assert by_ext["attendance_2019.xlsx"] == "spreadsheet"
+    assert by_ext["service_slides_2019.pptx"] == "presentation"
+    assert by_ext["rummage_sale_flyer.wpd"] == "wordperfect"
+    assert by_ext["mystery.xyz"] == "unrecognized"
+
+
+def test_unsupported_format_does_not_emit_processed(corpus_root: Path, db_path: Path) -> None:
+    events: list[tuple[str, dict]] = []
+    run_preflight(
+        root=corpus_root,
+        db_path=db_path,
+        on_event=lambda kind, payload: events.append((kind, payload)),
+    )
+    pub_events = [
+        (kind, payload)
+        for kind, payload in events
+        if payload.get("path", "").endswith("newsletter_spring_2018.pub")
+    ]
+    assert len(pub_events) == 1
+    assert pub_events[0][0] == "unsupported"
+    assert pub_events[0][1]["format"] == "publisher"
+
+
+# ---------------------------------------------------------------------------
 # Schema v2 placeholder tables (#2)
 # ---------------------------------------------------------------------------
 

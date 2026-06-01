@@ -159,6 +159,15 @@ def corpus_root(tmp_path: Path) -> Path:
         "Counseling notes — confidential pastoral conversation.",
     )
 
+    # Known-but-unhandled formats. Bytes are arbitrary; pre-flight identifies
+    # them by extension, not content. Each must be non-empty so it isn't
+    # quarantined as "empty" instead.
+    (root / "newsletter_spring_2018.pub").write_bytes(b"%fake publisher payload\x00" * 16)
+    (root / "Bulletins" / "attendance_2019.xlsx").write_bytes(b"PK\x03\x04fake xlsx payload")
+    (root / "service_slides_2019.pptx").write_bytes(b"PK\x03\x04fake pptx payload")
+    (root / "rummage_sale_flyer.wpd").write_bytes(b"WordPerfect junk payload")
+    (root / "mystery.xyz").write_bytes(b"who knows what this is")
+
     return root
 
 

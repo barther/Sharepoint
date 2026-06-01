@@ -68,6 +68,7 @@ def _cmd_preflight(args: argparse.Namespace) -> int:
         f"duplicates={result.duplicates} "
         f"needs_ocr={result.needs_ocr} "
         f"excluded={result.excluded} "
+        f"unsupported={result.unsupported} "
         f"run_id={result.run_id}"
     )
     return 0
