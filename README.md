@@ -12,7 +12,7 @@ What slice 1 actually does:
 
 - Walks a local corpus directory, hashes every file (SHA-256), and writes a SQLite database
 - Extracts text from PDF / DOCX / TXT; flags scans and image files as `needs_ocr=True`
-- Flags recognised-but-unhandled formats (`.pub`, `.xls(x)`, `.ppt(x)`, `.wpd`, `.msg`, etc.) with an `unsupported_format` category so they're visible for follow-up conversion rather than silently passing through
+- Flags recognised-but-unhandled formats (`.pub`, `.xls(x)`, `.ppt(x)`, `.wpd`, `.msg`, etc.) with an `unsupported_format` category so they're visible for follow-up conversion rather than silently passing through; legacy binary `.doc` files that fail extraction are flagged the same way (`legacy_word`)
 - Local legibility pre-check on images and image-only PDFs (Michelson contrast + estimated DPI)
 - Detects exact hash duplicates (`dup_of_file_id` FK to the retained original)
 - Quarantines empty / corrupt / password-protected files (technical reasons)
@@ -20,7 +20,7 @@ What slice 1 actually does:
 - Persists per-run history in `file_observations` so modified files preserve their prior state
 - Idempotent re-runs (skip files whose `(path, sha256)` already exists)
 
-The schema is designed at v2 to cover the §10 acceptance-criteria queries (`document_references`, `decisions`, `obligations`, `policy_statements`, `sensitive_flags`, `evidence_quotes`, `entities`, `participants`). Those tables exist but are populated only by later slices.
+The schema is designed to cover the §10 acceptance-criteria queries (`document_references`, `decisions`, `obligations`, `policy_statements`, `sensitive_flags`, `evidence_quotes`, `entities`, `participants`). Those tables exist but are populated only by later slices. The current schema version lives in `schema.py` alongside a version history.
 
 Slice 1 is **CLI-only** (`church-archivist preflight <corpus> --db archive.sqlite [--exclusions config.json]`). The "no command-line interaction" requirement in §6 is a final-product goal; the GUI replaces this surface in a later slice.
 

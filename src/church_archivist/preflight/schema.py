@@ -1,11 +1,21 @@
 """SQLite schema for the archive.
 
-Schema version 2 adds the relational structures required by the §10
-acceptance criteria (references, decisions, obligations, policy_statements,
-sensitive_flags, evidence_quotes, entities, participants), a
-file_observations history table so per-run state survives modification,
-and explicit exclusion tracking (governance-driven, distinct from
-quarantine).
+Version history:
+
+- v1 — files + pre_flight_runs; Core extraction fields as nullable columns
+- v2 — relational structures required by the §10 acceptance criteria
+  (references, decisions, obligations, policy_statements, sensitive_flags,
+  evidence_quotes, entities, participants), a file_observations history
+  table so per-run state survives modification, and explicit exclusion
+  tracking (governance-driven, distinct from quarantine)
+- v3 — files.unsupported_format category column
+- v4 — no DDL change; recorded-data semantics fixed: file_observations
+  rows now carry the real needs_ocr flag (previously always 0), skipped
+  files inherit their prior assessment into the observation row, and
+  dup_of_file_id always references the canonical retained original rather
+  than possibly chaining through another duplicate. The bump forces
+  regeneration of databases whose rows were computed under the old
+  semantics.
 
 The pre-flight pass populates only what it actually computes locally:
 files, file_observations, exclusion_log entries when a config matches.
@@ -20,7 +30,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_meta (
