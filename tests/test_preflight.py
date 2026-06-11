@@ -78,6 +78,29 @@ def test_preflight_detects_hash_duplicate(corpus_root: Path, db_path: Path) -> N
     assert original and "20190421_bulletin.pdf" in original[0]["relative_path"]
 
 
+def test_duplicate_triple_points_at_single_original(tmp_path: Path) -> None:
+    """With 3+ identical copies, every duplicate must reference the one
+    retained original directly — never another duplicate (no chains)."""
+    root = tmp_path / "dups"
+    root.mkdir()
+    content = "Identical bulletin content used for duplicate detection.\n"
+    for name in ("a_original.txt", "b_copy.txt", "c_copy.txt"):
+        (root / name).write_text(content, encoding="utf-8")
+
+    db = tmp_path / "dups.sqlite"
+    run_preflight(root=root, db_path=db)
+
+    conn = connect(db)
+    rows = _rows(
+        conn,
+        "SELECT id, relative_path, dup_of_file_id FROM files ORDER BY relative_path",
+    )
+    original, copy_b, copy_c = rows
+    assert original["dup_of_file_id"] is None
+    assert copy_b["dup_of_file_id"] == original["id"]
+    assert copy_c["dup_of_file_id"] == original["id"], "duplicates must not chain"
+
+
 def test_preflight_quarantines_zero_byte_and_corrupt(corpus_root: Path, db_path: Path) -> None:
     run_preflight(root=corpus_root, db_path=db_path)
     conn = connect(db_path)
@@ -147,6 +170,39 @@ def test_preflight_extracts_text_from_pdf_and_docx(corpus_root: Path, db_path: P
     for r in rows:
         assert r["extractable_text"] == 1
         assert r["extracted_char_count"] > 0
+
+
+def test_short_documents_are_extractable(tmp_path: Path) -> None:
+    """Structural formats (plain text, docx) have no scan ambiguity: any
+    non-empty extraction is extractable. The minimum-character threshold
+    is a PDF scan-detection heuristic and must not apply here."""
+    from docx import Document
+
+    root = tmp_path / "short"
+    root.mkdir()
+    note = "Choir at 9am."  # well under the PDF threshold
+    (root / "note.txt").write_text(note, encoding="utf-8")
+    doc = Document()
+    doc.add_paragraph("Approved.")
+    doc.save(str(root / "approval.docx"))
+
+    db = tmp_path / "short.sqlite"
+    run_preflight(root=root, db_path=db)
+
+    conn = connect(db)
+    rows = {
+        r["filename"]: r
+        for r in _rows(
+            conn,
+            "SELECT filename, extractable_text, extracted_char_count, needs_ocr "
+            "FROM files",
+        )
+    }
+    assert rows["note.txt"]["extractable_text"] == 1
+    assert rows["note.txt"]["extracted_char_count"] == len(note)
+    assert rows["note.txt"]["needs_ocr"] == 0
+    assert rows["approval.docx"]["extractable_text"] == 1
+    assert rows["approval.docx"]["needs_ocr"] == 0
 
 
 def test_preflight_handles_unicode_filenames(corpus_root: Path, db_path: Path) -> None:
@@ -228,6 +284,44 @@ def test_modified_file_keeps_prior_observation(corpus_root: Path, db_path: Path)
     assert len(observations) == 2
     assert observations[0]["sha256"] != observations[1]["sha256"], \
         "observation hashes should differ after modification"
+
+
+def test_observations_record_assessment_state(corpus_root: Path, db_path: Path) -> None:
+    """Observation rows must carry the real assessment values — including on
+    re-runs, where a skipped (unchanged) file inherits its prior state."""
+    run_preflight(root=corpus_root, db_path=db_path)
+    run_preflight(root=corpus_root, db_path=db_path)  # second run: all skipped
+
+    conn = connect(db_path)
+    scan_id = _rows(
+        conn, "SELECT id FROM files WHERE filename = ?", "low_contrast_scan.jpg"
+    )[0]["id"]
+    obs = _rows(
+        conn,
+        "SELECT needs_ocr, legibility_flag FROM file_observations "
+        "WHERE file_id = ? ORDER BY run_id",
+        scan_id,
+    )
+    assert len(obs) == 2
+    assert all(o["needs_ocr"] == 1 for o in obs), \
+        "needs_ocr state must survive into observation history"
+    assert all(o["legibility_flag"] in {"messy", "illegible"} for o in obs)
+
+    pdf = _rows(
+        conn,
+        "SELECT id, extracted_char_count FROM files WHERE filename = ?",
+        "20190421_bulletin.pdf",
+    )[0]
+    obs = _rows(
+        conn,
+        "SELECT extracted_char_count FROM file_observations "
+        "WHERE file_id = ? ORDER BY run_id",
+        pdf["id"],
+    )
+    assert len(obs) == 2
+    assert all(
+        o["extracted_char_count"] == pdf["extracted_char_count"] for o in obs
+    ), "char count must carry over to skipped-file observations"
 
 
 # ---------------------------------------------------------------------------
@@ -396,12 +490,41 @@ def test_unsupported_format_does_not_emit_processed(corpus_root: Path, db_path: 
     assert pub_events[0][1]["format"] == "publisher"
 
 
+def test_legacy_doc_failure_flagged_unsupported(corpus_root: Path, db_path: Path) -> None:
+    """A binary .doc that mammoth cannot parse must surface as
+    unsupported_format="legacy_word" — not quarantined, not "processed"."""
+    events: list[tuple[str, dict]] = []
+    run_preflight(
+        root=corpus_root,
+        db_path=db_path,
+        on_event=lambda kind, payload: events.append((kind, payload)),
+    )
+    doc_events = [
+        (kind, payload)
+        for kind, payload in events
+        if payload.get("path", "").endswith("1998_board_minutes.doc")
+    ]
+    assert len(doc_events) == 1
+    assert doc_events[0][0] == "unsupported"
+    assert doc_events[0][1]["format"] == "legacy_word"
+
+    conn = connect(db_path)
+    rows = _rows(
+        conn,
+        "SELECT unsupported_format, quarantine_reason, is_readable "
+        "FROM files WHERE filename = ?",
+        "1998_board_minutes.doc",
+    )
+    assert rows[0]["unsupported_format"] == "legacy_word"
+    assert rows[0]["quarantine_reason"] is None
+
+
 # ---------------------------------------------------------------------------
-# Schema v2 placeholder tables (#2)
+# Relational placeholder tables for §10 queries (#2)
 # ---------------------------------------------------------------------------
 
 
-def test_schema_v2_relational_tables_accept_inserts(corpus_root: Path, db_path: Path) -> None:
+def test_schema_relational_tables_accept_inserts(corpus_root: Path, db_path: Path) -> None:
     """Smoke-test that the §10-query tables actually accept FK-correct inserts.
 
     Slice 1 doesn't populate these, but if the schema is wrong we want to know

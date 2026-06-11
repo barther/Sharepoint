@@ -59,9 +59,16 @@ def _classify_quarantine(sf: ScannedFile, extract_failure: str | None) -> str | 
         return "password-protected"
     if extract_failure and extract_failure.startswith("PdfReadError"):
         return "corrupt"
+    # mammoth failures are exempt: the extractor flags those files as
+    # unsupported_format="legacy_word" (conversion punch-list), and
+    # quarantine would shadow that flag in the event chain.
     if extract_failure and not extract_failure.startswith("mammoth"):
         return "unreadable"
     return None
+
+
+def _leg_flag(leg_result) -> str | None:
+    return leg_result.flag if leg_result.flag != "not_applicable" else None
 
 
 def run_preflight(
@@ -217,7 +224,9 @@ def _process_file(
 ) -> str:
     """Return one of: 'new', 'skipped', 'failed'."""
     existing = conn.execute(
-        "SELECT id, sha256 FROM files WHERE path = ?", (str(sf.path),)
+        "SELECT id, sha256, extracted_char_count, needs_ocr, legibility_score, "
+        "legibility_flag, quarantine_reason FROM files WHERE path = ?",
+        (str(sf.path),),
     ).fetchone()
 
     if existing is not None and existing["sha256"] == sf.sha256:
@@ -226,8 +235,19 @@ def _process_file(
             (run_id, existing["id"]),
         )
         # Even on a skipped file we record an observation so the audit log
-        # captures "this file was seen during this run".
-        _insert_observation(conn, existing["id"], run_id, sf, None, None, None)
+        # captures "this file was seen during this run". Content is
+        # unchanged, so the prior assessment still holds and carries over.
+        _insert_observation(
+            conn,
+            existing["id"],
+            run_id,
+            sf,
+            char_count=existing["extracted_char_count"],
+            needs_ocr=existing["needs_ocr"],
+            legibility_score=existing["legibility_score"],
+            legibility_flag=existing["legibility_flag"],
+            quarantine=existing["quarantine_reason"],
+        )
         return "skipped"
 
     try:
@@ -241,11 +261,15 @@ def _process_file(
     matched_rule = match_first(rules, sf.relative_path)
 
     # Dedup uses file_id, not the raw hash, so callers can navigate to the
-    # retained original via FK rather than re-querying by sha256.
+    # retained original via FK rather than re-querying by sha256. Only
+    # non-duplicate rows qualify as the target (earliest first), so with
+    # three or more copies every duplicate points at the single retained
+    # original instead of forming chains.
     dup_of_file_id = None
     if sf.sha256 and not sf.is_empty:
         prior = conn.execute(
-            "SELECT id FROM files WHERE sha256 = ? AND path != ? LIMIT 1",
+            "SELECT id FROM files WHERE sha256 = ? AND path != ? "
+            "AND dup_of_file_id IS NULL ORDER BY id LIMIT 1",
             (sf.sha256, str(sf.path)),
         ).fetchone()
         if prior is not None:
@@ -268,9 +292,11 @@ def _process_file(
         file_id,
         run_id,
         sf,
-        ext_result.char_count,
-        leg_result,
-        quarantine,
+        char_count=ext_result.char_count,
+        needs_ocr=ext_result.needs_ocr,
+        legibility_score=leg_result.contrast,
+        legibility_flag=_leg_flag(leg_result),
+        quarantine=quarantine,
     )
 
     if matched_rule is not None:
@@ -292,7 +318,7 @@ def _upsert_file(
 ) -> int:
     excluded = 1 if matched_rule is not None else 0
     exclusion_reason = matched_rule.reason if matched_rule is not None else None
-    leg_flag = leg_result.flag if leg_result.flag != "not_applicable" else None
+    leg_flag = _leg_flag(leg_result)
 
     if existing is None:
         cur = conn.execute(
@@ -354,12 +380,13 @@ def _insert_observation(
     file_id: int,
     run_id: int,
     sf: ScannedFile,
+    *,
     char_count: int | None,
-    leg_result,
+    needs_ocr: bool | int,
+    legibility_score: float | None,
+    legibility_flag: str | None,
     quarantine: str | None,
 ) -> None:
-    leg_flag = leg_result.flag if leg_result and leg_result.flag != "not_applicable" else None
-    leg_score = leg_result.contrast if leg_result else None
     conn.execute(
         """
         INSERT INTO file_observations (
@@ -376,9 +403,9 @@ def _insert_observation(
             sf.size_bytes,
             sf.mtime_utc,
             char_count,
-            0 if leg_result is None else 0,  # observation row inherits from files later
-            leg_score,
-            leg_flag,
+            int(needs_ocr),
+            legibility_score,
+            legibility_flag,
             quarantine,
         ),
     )

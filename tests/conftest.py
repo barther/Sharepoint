@@ -159,6 +159,14 @@ def corpus_root(tmp_path: Path) -> Path:
         "Counseling notes — confidential pastoral conversation.",
     )
 
+    # Legacy binary .doc (OLE2 magic + junk). mammoth only parses the docx
+    # zip container, so extraction fails and pre-flight must flag it as
+    # unsupported_format="legacy_word" rather than letting it pass as
+    # processed or quarantining it.
+    (root / "Minutes" / "1998_board_minutes.doc").write_bytes(
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"legacy word junk " * 8
+    )
+
     # Known-but-unhandled formats. Bytes are arbitrary; pre-flight identifies
     # them by extension, not content. Each must be non-empty so it isn't
     # quarantined as "empty" instead.
